@@ -51,12 +51,12 @@ def getInterview():
     df = df.reset_index(drop=True)
     return df
 
-def customTokenDict():
+def getDictTrie():
     # custom words
     words = ['คลัช', 'ครัทช์', 'บู๊ช', 'ยาง', 'บน', 'หูแหนบ', 'ไส้กรอง', 'โซล่า', 'สปอร์ตไลน์', 'ยอย', 'ไดร์ชาร์จ',
              'โบลเวอร์', 'จาน', 'คลัทช์', 'หนวดกุ้ง', 'ปีกนก', 'ขาไก่', 'เพลา', 'ไทม์มิ่ง', 'ฟลายวีล', 'ปะเก็น', 'ดรัม', 'ดิส',
              'น้ำมัน', 'ดีเซล', 'เบนซิน', 'เกียร์', 'เครื่อง', 'เกียร์', 'ประเก็น', 'โอริง', 'เขม่า', 'ตามด', 'ขี้เกลือ', 'เพาเวอร์', 'เครื่อง',
-             'ชาร์ฟ', 'ขุรขระ', 'กลิ่น', 'อาการ', 'สึกหรอ']
+             'ชาร์ฟ', 'ขุรขระ', 'กลิ่น', 'อาการ', 'สึกหรอ', 'ผ้าเบรค', 'แป้นเบรค']
     custom_word_list = set(thai_words())
     custom_word_list.update(words)
     trie = dict_trie(dict_source=custom_word_list)
@@ -69,32 +69,25 @@ def word_tokenizer(word, whitespace=False):
 from itertools import chain
 def syllable_tokenizer(word, whitespace=False):
     syllable_word = subword_tokenize(word, engine='ssg', keep_whitespace=whitespace)
-    syllable_word = [' '.join(word_tokenizer(w)).split() for w in syllable_word]
+    syllable_word = [word_tokenizer(w, whitespace) for w in syllable_word]
     syllable_word = list(chain.from_iterable(syllable_word))
     return syllable_word
 
 def text_processor(text, whitespace=True):
     text = [w.lower() for w in word_tokenizer(text, whitespace)]
     text = [word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in text]
-    text = [word for word in text if not word.isnumeric()]
-    text = [word for word in text if len(word) > 1]
+    # NOTE: Remove number from text ***may be used
+    # text = [word for word in text if not word.isnumeric()]
     text = ''.join(text)
     return text
 
-def partsMean(dataframe):
-    dist = dataframe['parts'].value_counts()
-    mean_dist = dist[dist.values > dist.mean()]
-    return mean_dist
 
-def topicDict(dataframe, stop_words):
-    lda_docs = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
-    lda_docs = [[word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in doc] for doc in lda_docs]
-    # lda_docs = [[word for word in doc if len(word) > 2] for doc in lda_docs]
-    # remove stop thai word manually
-    lda_docs = [[word for word in doc if word not in stop_words] for doc in lda_docs]
-    return lda_docs
+def topicExtraction(dataframe, stop_words):
+    lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
+    lda_dicts = [[word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in doc] for doc in
+                lda_dicts]
+    lda_dicts = [[word for word in doc if word not in stop_words] for doc in lda_dicts]
 
-def topicExtraction(lda_dicts, dataframe):
     dictionary = Dictionary(lda_dicts)
     corpus = [dictionary.doc2bow(doc) for doc in lda_dicts]
     print('Number of unique tokens: %d' % len(dictionary))
@@ -132,7 +125,7 @@ def topicExtraction(lda_dicts, dataframe):
     dataframe = pd.concat([dataframe, sent_topics_df], axis=1)
     return top_topics, dataframe
 
-def send_email(receiver_email, body, excel):
+def sendEmail(receiver_email, body):
     server = smtplib.SMTP('smtp.gmail.com:587')
     server.ehlo()
     server.starttls()
@@ -154,6 +147,20 @@ def send_email(receiver_email, body, excel):
     server.quit()
     print('Email is sent')
 
+def createTokenVec(dataframe):
+    token_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
+    X_token = token_vec.fit_transform(dataframe['symptoms'])
+    return token_vec, X_token
+
+def createSyllableVec(dataframe):
+    syllable_vec = TfidfVectorizer(tokenizer=syllable_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
+    X_syllable = syllable_vec.fit_transform(dataframe['symptoms'])
+    return syllable_vec, X_syllable
+
+def createTopicVec(dataframe):
+    topic_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
+    X_topic = topic_vec.fit_transform(dataframe['topic_keywords'])
+    return topic_vec, X_topic
 
 def upload_s3_folder(path):
     bucket = s3.Bucket('cds-bucket')
@@ -167,71 +174,65 @@ def upload_s3_folder(path):
             with open(full_path, 'rb') as data:
                 bucket.put_object(Key=(directory_name + '/' + file), Body=data)
 
+def trainModel(part, dataframe):
+    train_df = dataframe.copy()
+    train_df['parts'] = np.where(train_df['parts'] == part, 1, 0)
+    y = train_df['parts']
+    # Oversampling dataset
+    X_samp, y_samp = oversampler.sample(X.todense(), y)
+    X_fit, X_test, y_fit, y_test = model_selection.train_test_split(X_samp, y_samp, test_size=0.2, random_state=42)
+    # GradientBoosting
+    gb_model = ensemble.GradientBoostingClassifier()
+    m = gb_model.fit(X_fit, y_fit)
+    return m
 
+if __name__ == '__main__':
+    stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
+                      'ถ้า', 'เช่น', 'คือ', 'เขา', 'ของ', 'แค่', 'และ', 'อาจ', 'ทำ', 'ให้',
+                      'ว่า', 'ก็', 'หรือ', 'เพราะ', 'ที่', 'เป็น', 'ๆ']
+    trie = getDictTrie()
+    df = getInterview()
+    print('Load the assets successfully')
 
-stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
-                  'ถ้า', 'เช่น', 'คือ', 'เขา', 'ของ', 'แค่', 'และ', 'อาจ', 'ทำ', 'ให้',
-                  'ว่า', 'ก็', 'หรือ', 'เพราะ', 'ที่', 'เป็น', 'ๆ']
-trie = customTokenDict()
-df = getInterview()
-print('Load the assets successfully')
+    for msg in consumer:
+        print("Indexing process is start")
+        msg_df = pd.DataFrame(msg.value)
+        msg_df.columns = ['parts', 'symptoms']
 
-for msg in consumer:
-    msg_df = pd.DataFrame(msg.value)
-    msg_df.columns = ['parts', 'symptoms']
+        df = pd.concat([df, msg_df], join='inner', ignore_index=True)
+        # NOTE: Find the parts occurrence that more than mean
+        dist = df['parts'].value_counts()
+        mean_dist = dist[dist.values > dist.mean()]
 
-    df = pd.concat([df, msg_df], join='inner', ignore_index=True)
+        df = df[df['parts'].isin(mean_dist.index)].reset_index(drop=True)
 
-    mean_dist = partsMean(df)
-    df = df[df['parts'].isin(mean_dist.index)]
-    df = df.reset_index(drop=True)
+        lda_topic, df = topicExtraction(df, stop_words)
 
-    lda_dicts = topicDict(df, stop_words)
-    lda_topic, df = topicExtraction(lda_dicts, df)
+        oversampler = sv.polynom_fit_SMOTE()
 
-    token_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words,
-                                lowercase=True)
-    syllable_vec = TfidfVectorizer(tokenizer=syllable_tokenizer, preprocessor=text_processor, stop_words=stop_words,
-                                   lowercase=True)
-    topic_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words,
-                                lowercase=True)
+        token_vec, X_token = createTokenVec(df)
+        syllable_vec, X_syllable = createSyllableVec(df)
+        topic_vec, X_topic = createTopicVec(df)
 
-    oversampler = sv.polynom_fit_SMOTE()
-    models = []
+        X = hstack([X_token, X_syllable, X_topic])
 
-    X_token = token_vec.fit_transform(df['symptoms'])
-    X_syllable = syllable_vec.fit_transform(df['symptoms'])
-    X_topic = topic_vec.fit_transform(df['topic_keywords'])
+        models = []
+        for part in mean_dist.index[:2]:
+            print('Train {} model'.format(part))
+            m = trainModel(part, df)
+            models.append({'part': part, 'model': m})
 
-    X = hstack([X_token, X_syllable, X_topic])
+        if not os.path.exists('pickles'):
+            os.makedirs('pickles')
+        pickle.dump(trie, open('pickles/trie.pkl', 'wb'))
+        pickle.dump(models, open('pickles/models.pkl', 'wb'))
+        pickle.dump(token_vec, open('pickles/token_vec.pkl', 'wb'))
+        pickle.dump(syllable_vec, open('pickles/syllable_vec.pkl', 'wb'))
+        pickle.dump(topic_vec, open('pickles/topic_vec.pkl', 'wb'))
+        pickle.dump(lda_topic, open('pickles/lda_topic.pkl', 'wb'))
 
-
-    for part in mean_dist.index:
-        print('Train {} model'.format(part))
-        train_df = df.copy()
-        train_df['parts'] = np.where(train_df['parts'] == part, 1, 0)
-        y = train_df['parts']
-        # Oversampling dataset
-        X_samp, y_samp = oversampler.sample(X.todense(), y)
-        X_fit, X_test, y_fit, y_test = model_selection.train_test_split(X_samp, y_samp, test_size=0.2, random_state=42)
-        # GradientBoosting
-        gb_model = ensemble.GradientBoostingClassifier()
-        m = gb_model.fit(X_fit, y_fit)
-        models.append({'part': part, 'model': m})
-
-
-
-    if not os.path.exists('pickles'):
-        os.makedirs('pickles')
-    pickle.dump(trie, open('pickles/trie.pkl', 'wb'))
-    pickle.dump(models, open('pickles/models.pkl', 'wb'))
-    pickle.dump(token_vec, open('pickles/token_vec.pkl', 'wb'))
-    pickle.dump(syllable_vec, open('pickles/syllable_vec.pkl', 'wb'))
-    pickle.dump(topic_vec, open('pickles/topic_vec.pkl', 'wb'))
-    pickle.dump(lda_topic, open('pickles/lda_topic.pkl', 'wb'))
-
-    upload_s3_folder('pickles')
-    send_email('tulyawatt@gmail.com', 'The indexing process is done.', msg_df)
+        upload_s3_folder('pickles')
+        sendEmail('tulyawatt@gmail.com', 'The indexing process is done.')
 
 
 
