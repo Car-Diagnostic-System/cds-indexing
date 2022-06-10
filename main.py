@@ -48,7 +48,9 @@ def getInterview():
     df = df.drop(['Timestamp', 'Untitled Question'], 1)
     df = df[df['symptoms'].notnull()]
     df['category'] = df['category'].ffill(0)
-    df = df.reset_index(drop=True)
+    dist = df['parts'].value_counts()
+    mean_dist = dist[dist.values > dist.mean()]
+    df = df[df['parts'].isin(mean_dist.index)].reset_index(drop=True)
     return df
 
 def getDictTrie():
@@ -62,13 +64,13 @@ def getDictTrie():
     trie = dict_trie(dict_source=custom_word_list)
     return trie
 
-def word_tokenizer(word, whitespace=False):
-    token_word = word_tokenize(text=word, keep_whitespace=whitespace, custom_dict=trie)
+def word_tokenizer(text, whitespace=False):
+    token_word = word_tokenize(text=text, keep_whitespace=whitespace, custom_dict=trie)
     return token_word
 
 from itertools import chain
-def syllable_tokenizer(word, whitespace=False):
-    syllable_word = subword_tokenize(word, engine='ssg', keep_whitespace=whitespace)
+def syllable_tokenizer(text, whitespace=False):
+    syllable_word = subword_tokenize(text, engine='ssg', keep_whitespace=whitespace)
     syllable_word = [word_tokenizer(w, whitespace) for w in syllable_word]
     syllable_word = list(chain.from_iterable(syllable_word))
     return syllable_word
@@ -80,7 +82,6 @@ def text_processor(text, whitespace=True):
     # text = [word for word in text if not word.isnumeric()]
     text = ''.join(text)
     return text
-
 
 def topicExtraction(dataframe, stop_words):
     lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
@@ -103,7 +104,7 @@ def topicExtraction(dataframe, stop_words):
     id2word = dictionary.id2token
 
     lda_model = LdaModel(corpus=corpus, id2word=id2word, chunksize=chunksize, alpha='auto', eta='auto', iterations=iterations, num_topics=num_topics, passes=passes, eval_every=eval_every)
-    top_topics = lda_model.top_topics(corpus)  # , num_words=20)
+    top_topics = lda_model.top_topics(corpus)
 
     # Average topic coherence is the sum of topic coherences of all topics, divided by the number of topics.
     avg_topic_coherence = sum([t[1] for t in top_topics]) / num_topics
@@ -123,7 +124,7 @@ def topicExtraction(dataframe, stop_words):
                 break
     sent_topics_df.columns = ['dominant_topic', 'perc_contribution', 'topic_keywords']
     dataframe = pd.concat([dataframe, sent_topics_df], axis=1)
-    return top_topics, dataframe
+    return dataframe
 
 def sendEmail(receiver_email, body):
     server = smtplib.SMTP('smtp.gmail.com:587')
@@ -147,32 +148,31 @@ def sendEmail(receiver_email, body):
     server.quit()
     print('Email is sent')
 
-def createTokenVec(dataframe):
+def createTokenVec(symptoms):
     token_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
-    X_token = token_vec.fit_transform(dataframe['symptoms'])
+    X_token = token_vec.fit_transform(symptoms)
     return token_vec, X_token
 
-def createSyllableVec(dataframe):
+def createSyllableVec(symptoms):
     syllable_vec = TfidfVectorizer(tokenizer=syllable_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
-    X_syllable = syllable_vec.fit_transform(dataframe['symptoms'])
+    X_syllable = syllable_vec.fit_transform(symptoms)
     return syllable_vec, X_syllable
 
-def createTopicVec(dataframe):
+def createTopicVec(topics):
     topic_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
-    X_topic = topic_vec.fit_transform(dataframe['topic_keywords'])
+    X_topic = topic_vec.fit_transform(topics)
     return topic_vec, X_topic
 
-def upload_s3_folder(path):
-    bucket = s3.Bucket('cds-bucket')
+def upload_s3_folder(path, bucket_name):
+    bucket = s3.Bucket(bucket_name)
     bucket.objects.all().delete()
-    directory_name = "pickles"
-    bucket.put_object(Key=(directory_name + '/'))
+    bucket.put_object(Key=(path + '/'))
 
     for subdir, dirs, files in os.walk(path):
         for file in files:
             full_path = os.path.join(subdir, file)
             with open(full_path, 'rb') as data:
-                bucket.put_object(Key=(directory_name + '/' + file), Body=data)
+                bucket.put_object(Key=(path + '/' + file), Body=data)
 
 def trainModel(part, dataframe):
     train_df = dataframe.copy()
@@ -201,23 +201,19 @@ if __name__ == '__main__':
 
         df = pd.concat([df, msg_df], join='inner', ignore_index=True)
         # NOTE: Find the parts occurrence that more than mean
-        dist = df['parts'].value_counts()
-        mean_dist = dist[dist.values > dist.mean()]
 
-        df = df[df['parts'].isin(mean_dist.index)].reset_index(drop=True)
-
-        lda_topic, df = topicExtraction(df, stop_words)
+        df = topicExtraction(df, stop_words)
 
         oversampler = sv.polynom_fit_SMOTE()
 
-        token_vec, X_token = createTokenVec(df)
-        syllable_vec, X_syllable = createSyllableVec(df)
-        topic_vec, X_topic = createTopicVec(df)
+        token_vec, X_token = createTokenVec(df['symptoms'])
+        syllable_vec, X_syllable = createSyllableVec(df['symptoms'])
+        topic_vec, X_topic = createTopicVec(df['topic_keywords'])
 
         X = hstack([X_token, X_syllable, X_topic])
 
         models = []
-        for part in mean_dist.index[:2]:
+        for part in df['parts'].value_counts().index:
             print('Train {} model'.format(part))
             m = trainModel(part, df)
             models.append({'part': part, 'model': m})
@@ -229,9 +225,8 @@ if __name__ == '__main__':
         pickle.dump(token_vec, open('pickles/token_vec.pkl', 'wb'))
         pickle.dump(syllable_vec, open('pickles/syllable_vec.pkl', 'wb'))
         pickle.dump(topic_vec, open('pickles/topic_vec.pkl', 'wb'))
-        pickle.dump(lda_topic, open('pickles/lda_topic.pkl', 'wb'))
 
-        upload_s3_folder('pickles')
+        upload_s3_folder('pickles', 'cds-bucket')
         sendEmail('tulyawatt@gmail.com', 'The indexing process is done.')
 
 
