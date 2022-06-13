@@ -68,30 +68,11 @@ class Index:
         trie = dict_trie(dict_source=custom_word_list)
         return trie
 
-    @staticmethod
-    def word_tokenizer(text, whitespace=False):
-        token_word = word_tokenize(text=text, keep_whitespace=whitespace, custom_dict=trie)
-        return token_word
+
 
     @staticmethod
-    def syllable_tokenizer(text, whitespace=False):
-        syllable_word = subword_tokenize(text, engine='ssg', keep_whitespace=whitespace)
-        syllable_word = [Index.word_tokenizer(w, whitespace) for w in syllable_word]
-        syllable_word = list(chain.from_iterable(syllable_word))
-        return syllable_word
-
-    @staticmethod
-    def text_processor(text, whitespace=True):
-        text = [w.lower() for w in Index.word_tokenizer(text, whitespace)]
-        text = [word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in text]
-        # NOTE: Remove number from text ***may be used
-        # text = [word for word in text if not word.isnumeric()]
-        text = ''.join(text)
-        return text
-
-    @staticmethod
-    def topicExtraction(dataframe, stop_words):
-        lda_dicts = dataframe['symptoms'].apply(lambda s: Index.word_tokenizer(s))
+    def topicExtraction(dataframe):
+        lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
         lda_dicts = [[word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in doc] for doc in
                     lda_dicts]
         lda_dicts = [[word for word in doc if word not in stop_words] for doc in lda_dicts]
@@ -157,20 +138,20 @@ class Index:
         print('Email is sent')
 
     @staticmethod
-    def createTokenVec(symptoms):
-        token_vec = TfidfVectorizer(tokenizer=Index.word_tokenizer, preprocessor=Index.text_processor, stop_words=stop_words, lowercase=True)
-        X_token = token_vec.fit_transform(symptoms)
-        return token_vec, X_token
+    def createWordVec(symptoms):
+        word_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
+        X_word = word_vec.fit_transform(symptoms)
+        return word_vec, X_word
 
     @staticmethod
     def createSyllableVec(symptoms):
-        syllable_vec = TfidfVectorizer(tokenizer=Index.syllable_tokenizer, preprocessor=Index.text_processor, stop_words=stop_words, lowercase=True)
+        syllable_vec = TfidfVectorizer(tokenizer=syllable_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
         X_syllable = syllable_vec.fit_transform(symptoms)
         return syllable_vec, X_syllable
 
     @staticmethod
     def createTopicVec(topics):
-        topic_vec = TfidfVectorizer(tokenizer=Index.word_tokenizer, preprocessor=Index.text_processor, stop_words=stop_words, lowercase=True)
+        topic_vec = TfidfVectorizer(tokenizer=word_tokenizer, preprocessor=text_processor, stop_words=stop_words, lowercase=True)
         X_topic = topic_vec.fit_transform(topics)
         return topic_vec, X_topic
 
@@ -187,8 +168,8 @@ class Index:
                     bucket.put_object(Key=(path + '/' + file), Body=data)
 
     @staticmethod
-    def trainModel(part, dataframe):
-        train_df = dataframe.copy()
+    def trainModel(part):
+        train_df = df.copy()
         train_df['parts'] = np.where(train_df['parts'] == part, 1, 0)
         y = train_df['parts']
         # Oversampling dataset
@@ -198,6 +179,24 @@ class Index:
         gb_model = ensemble.GradientBoostingClassifier()
         m = gb_model.fit(X_fit, y_fit)
         return m
+
+def word_tokenizer(text, whitespace=False):
+    token_word = word_tokenize(text=text, keep_whitespace=whitespace, custom_dict=trie)
+    return token_word
+
+def syllable_tokenizer(text, whitespace=False):
+    syllable_word = subword_tokenize(text, engine='ssg', keep_whitespace=whitespace)
+    syllable_word = [word_tokenizer(w, whitespace) for w in syllable_word]
+    syllable_word = list(chain.from_iterable(syllable_word))
+    return syllable_word
+
+def text_processor(text, whitespace=True):
+    text = [w.lower() for w in word_tokenizer(text, whitespace)]
+    text = [word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in text]
+    # NOTE: Remove number from text ***may be used
+    # text = [word for word in text if not word.isnumeric()]
+    text = ''.join(text)
+    return text
 
 if __name__ == '__main__':
     stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
@@ -215,27 +214,27 @@ if __name__ == '__main__':
         df = pd.concat([df, msg_df], join='inner', ignore_index=True)
         # NOTE: Find the parts occurrence that more than mean
 
-        df = Index.topicExtraction(df, stop_words)
+        df = Index.topicExtraction(df)
 
         oversampler = sv.polynom_fit_SMOTE()
 
-        token_vec, X_token = Index.createTokenVec(df['symptoms'])
+        word_vec, X_word = Index.createWordVec(df['symptoms'])
         syllable_vec, X_syllable = Index.createSyllableVec(df['symptoms'])
         topic_vec, X_topic = Index.createTopicVec(df['topic_keywords'])
 
-        X = hstack([X_token, X_syllable, X_topic])
+        X = hstack([X_word, X_syllable, X_topic])
 
         models = []
         for part in df['parts'].value_counts().index:
             print('Train {} model'.format(part))
-            m = Index.trainModel(part, df)
+            m = Index.trainModel(part)
             models.append({'part': part, 'model': m})
 
         if not os.path.exists('pickles'):
             os.makedirs('pickles')
         pickle.dump(trie, open('pickles/trie.pkl', 'wb'))
         pickle.dump(models, open('pickles/models.pkl', 'wb'))
-        pickle.dump(token_vec, open('pickles/token_vec.pkl', 'wb'))
+        pickle.dump(word_vec, open('pickles/word_vec.pkl', 'wb'))
         pickle.dump(syllable_vec, open('pickles/syllable_vec.pkl', 'wb'))
         pickle.dump(topic_vec, open('pickles/topic_vec.pkl', 'wb'))
 
