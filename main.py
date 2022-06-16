@@ -134,9 +134,9 @@ class Index:
 
             server.sendmail(sender_email, receiver_email, msg.as_string())
             server.quit()
-            return 'Email is sent successfully'
+            return 'email sent successfully'
         except:
-            return 'Email is sent failed'
+            return 'email sent failed'
 
     @staticmethod
     def createWordVec(symptoms):
@@ -163,15 +163,14 @@ class Index:
         try:
             bucket.objects.all().delete()
             bucket.put_object(Key=(path + '/'))
-
             for subdir, dirs, files in os.walk(path):
                 for file in files:
                     full_path = os.path.join(subdir, file)
                     with open(full_path, 'rb') as data:
                         bucket.put_object(Key=(path + '/' + file), Body=data)
-            return 'Upload is completed'
+            return "upload successful"
         except:
-            return "Upload is failed"
+            return "upload failed"
 
     @staticmethod
     def trainModel(part, X):
@@ -233,7 +232,7 @@ if __name__ == '__main__':
         models = []
         for part in df['parts'].value_counts().index:
             print('Train {} model'.format(part))
-            m = Index.trainModel(part)
+            m = Index.trainModel(part, X)
             models.append({'part': part, 'model': m})
 
         if not os.path.exists('pickles'):
