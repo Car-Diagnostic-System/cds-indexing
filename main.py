@@ -68,8 +68,6 @@ class Index:
         trie = dict_trie(dict_source=custom_word_list)
         return trie
 
-
-
     @staticmethod
     def topicExtraction(dataframe):
         lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
@@ -116,26 +114,29 @@ class Index:
 
     @staticmethod
     def sendEmail(receiver_email, body):
-        server = smtplib.SMTP('smtp.outlook.com:587')
-        server.ehlo()
-        server.starttls()
+        try:
+            server = smtplib.SMTP('smtp.outlook.com:587')
+            server.ehlo()
+            server.starttls()
 
-        sender_email = 'cds.developer.team@outlook.com'
-        sender_password = 'Cdspassword'
+            sender_email = 'cds.developer.team@outlook.com'
+            sender_password = 'Cdspassword'
 
-        server.login(sender_email, sender_password)
+            server.login(sender_email, sender_password)
 
-        msg = MIMEMultipart()
-        msg['Subject'] = 'Car Diagnostic System indexing process is done'
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
+            msg = MIMEMultipart()
+            msg['Subject'] = 'Car Diagnostic System indexing process is done'
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
 
-        msgText = MIMEText('<b>%s</b>' % (body), 'html')
-        msg.attach(msgText)
+            msgText = MIMEText('<b>%s</b>' % (body), 'html')
+            msg.attach(msgText)
 
-        server.sendmail(sender_email, receiver_email, msg.as_string())
-        server.quit()
-        print('Email is sent')
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+            return 'Email is sent successfully'
+        except:
+            return 'Email is sent failed'
 
     @staticmethod
     def createWordVec(symptoms):
@@ -158,17 +159,21 @@ class Index:
     @staticmethod
     def upload_s3_folder(path, bucket_name):
         bucket = s3.Bucket(bucket_name)
-        bucket.objects.all().delete()
-        bucket.put_object(Key=(path + '/'))
+        try:
+            bucket.objects.all().delete()
+            bucket.put_object(Key=(path + '/'))
 
-        for subdir, dirs, files in os.walk(path):
-            for file in files:
-                full_path = os.path.join(subdir, file)
-                with open(full_path, 'rb') as data:
-                    bucket.put_object(Key=(path + '/' + file), Body=data)
+            for subdir, dirs, files in os.walk(path):
+                for file in files:
+                    full_path = os.path.join(subdir, file)
+                    with open(full_path, 'rb') as data:
+                        bucket.put_object(Key=(path + '/' + file), Body=data)
+            return 'Upload is completed'
+        except:
+            return "Upload is failed"
 
     @staticmethod
-    def trainModel(part):
+    def trainModel(part, X):
         train_df = df.copy()
         train_df['parts'] = np.where(train_df['parts'] == part, 1, 0)
         y = train_df['parts']
@@ -198,12 +203,16 @@ def text_processor(text, whitespace=True):
     text = ''.join(text)
     return text
 
+
+
+stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
+              'ถ้า', 'เช่น', 'คือ', 'เขา', 'ของ', 'แค่', 'และ', 'อาจ', 'ทำ', 'ให้',
+              'ว่า', 'ก็', 'หรือ', 'เพราะ', 'ที่', 'เป็น', 'ๆ']
+trie = Index.getDictTrie()
+df = Index.getInterview()
+oversampler = sv.polynom_fit_SMOTE()
+
 if __name__ == '__main__':
-    stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
-                      'ถ้า', 'เช่น', 'คือ', 'เขา', 'ของ', 'แค่', 'และ', 'อาจ', 'ทำ', 'ให้',
-                      'ว่า', 'ก็', 'หรือ', 'เพราะ', 'ที่', 'เป็น', 'ๆ']
-    trie = Index.getDictTrie()
-    df = Index.getInterview()
     print('Load the assets successfully')
 
     for msg in consumer:
@@ -215,8 +224,6 @@ if __name__ == '__main__':
         # NOTE: Find the parts occurrence that more than mean
 
         df = Index.topicExtraction(df)
-
-        oversampler = sv.polynom_fit_SMOTE()
 
         word_vec, X_word = Index.createWordVec(df['symptoms'])
         syllable_vec, X_syllable = Index.createSyllableVec(df['symptoms'])
