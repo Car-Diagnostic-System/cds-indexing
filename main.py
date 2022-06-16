@@ -40,8 +40,8 @@ consumer = KafkaConsumer(
 
 class Index:
     @staticmethod
-    def getInterview():
-        interview = pd.read_excel('assets/interview.xlsx', sheet_name=None, usecols=[0, 1, 2, 3])
+    def getInterview(path):
+        interview = pd.read_excel(path, sheet_name=None, usecols=[0, 1, 2, 3])
         for sheet in list(interview.keys()):
             if sheet == 'Form Responses 1':
                 continue
@@ -70,7 +70,7 @@ class Index:
 
     @staticmethod
     def topicExtraction(dataframe):
-        lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenizer(s))
+        lda_dicts = dataframe['symptoms'].apply(lambda s: word_tokenize(text=s, keep_whitespace=False, custom_dict=trie))
         lda_dicts = [[word.translate(str.maketrans('', '', string.punctuation + u'\xa0')) for word in doc] for doc in
                     lda_dicts]
         lda_dicts = [[word for word in doc if word not in stop_words] for doc in lda_dicts]
@@ -156,6 +156,7 @@ class Index:
         X_topic = topic_vec.fit_transform(topics)
         return topic_vec, X_topic
 
+
     @staticmethod
     def upload_s3_folder(path, bucket_name):
         bucket = s3.Bucket(bucket_name)
@@ -191,7 +192,7 @@ def word_tokenizer(text, whitespace=False):
 
 def syllable_tokenizer(text, whitespace=False):
     syllable_word = subword_tokenize(text, engine='ssg', keep_whitespace=whitespace)
-    syllable_word = [word_tokenizer(w, whitespace) for w in syllable_word]
+    syllable_word = [word_tokenize(text=w, keep_whitespace=whitespace, custom_dict=trie) for w in syllable_word]
     syllable_word = list(chain.from_iterable(syllable_word))
     return syllable_word
 
@@ -203,13 +204,11 @@ def text_processor(text, whitespace=True):
     text = ''.join(text)
     return text
 
-
-
 stop_words = ['รถ', 'เป็น', 'ที่', 'ทำให้', 'แล้ว', 'จะ', 'โดย', 'แต่',
               'ถ้า', 'เช่น', 'คือ', 'เขา', 'ของ', 'แค่', 'และ', 'อาจ', 'ทำ', 'ให้',
               'ว่า', 'ก็', 'หรือ', 'เพราะ', 'ที่', 'เป็น', 'ๆ']
 trie = Index.getDictTrie()
-df = Index.getInterview()
+df = Index.getInterview('assets/interview.xlsx')
 oversampler = sv.polynom_fit_SMOTE()
 
 if __name__ == '__main__':
