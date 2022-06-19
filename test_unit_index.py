@@ -41,4 +41,4 @@ class TestUnitIndex(TestCase):
         actual_one = Index.upload_s3_folder('pickles', 'cds-bucket')
         actual_two = Index.upload_s3_folder('pickles', 'non-existed')
         self.assertEqual('upload successful', actual_one)
-        self.assertEqual('upload successful', actual_two)
+        self.assertEqual('upload failed', actual_two)
