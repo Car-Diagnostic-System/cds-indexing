@@ -1,3 +1,4 @@
 ﻿.idea
 pickles
 __pycache__
+.env
