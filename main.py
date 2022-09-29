@@ -113,15 +113,12 @@ class Index:
     @staticmethod
     def sendEmail(receiver_email, body):
         try:
-            server = smtplib.SMTP('smtp.outlook.com:587')
+            server = smtplib.SMTP(os.getenv('SMTP_HOST'))
             server.ehlo()
             server.starttls()
-
-            sender_email = 'cds.developer.team@outlook.com'
-            sender_password = 'Cdspassword'
-
+            sender_email = os.getenv('SENDER_EMAIL')
+            sender_password = os.getenv('SENDER_PASSWORD')
             server.login(sender_email, sender_password)
-
             msg = MIMEMultipart()
             msg['Subject'] = 'Car Diagnostic System indexing process is done'
             msg['From'] = sender_email
