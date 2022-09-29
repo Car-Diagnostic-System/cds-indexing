@@ -2,14 +2,12 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from itertools import chain
-
 from kafka import KafkaConsumer
 import pickle
 import os
 import numpy as np
 import json
 import string
-
 from pythainlp.corpus import thai_words
 from gensim.corpora import Dictionary
 from gensim.models import LdaModel
