@@ -7,3 +7,4 @@ pythainlp==3.0.8
 scikit_learn==1.1.1
 scipy==1.8.1
 smote_variants==0.1.2
+python-dotenv==0.21.0
