@@ -22,9 +22,9 @@ import boto3
 
 s3 = boto3.resource(
     service_name='s3',
-    region_name='ap-southeast-1',
-    aws_access_key_id='AKIAS6J3LCRT4MC74Y75',
-    aws_secret_access_key='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'
+    region_name=os.getenv('AWS_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
 )
 
 CONSUMER_TOPIC_NAME = "INDEX"
